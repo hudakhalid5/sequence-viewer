@@ -21,12 +21,6 @@ npm run dev
 
 Open the **Local** URL printed by Vite.
 
-### Basic functional test
-
-1. Start the application with `npm run dev`.
-2. Enter this example DNA sequence: `ATGCCATGAACTG`.
-3. Select **Plot Sequence**.
-
 ## Features and project status
 
 - DNA/RNA sequence input and validation
