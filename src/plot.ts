@@ -9,9 +9,49 @@ export type AlignedSequence = {
 
 // Demonstration alignment used when no FASTA alignment is uploaded.
 export const exampleAlignment: AlignedSequence[] = [
-  { name: "Human", sequence: "ATGCCATGAACT".repeat(8) },
-  { name: "Mouse", sequence: "ATGCCATGAGCT".repeat(8) },
-  { name: "Rat", sequence: "ATGCCATGA-CT".repeat(8) },
+  {
+    name: "Human",
+    sequence: `--ACATTTGCTTCTGACACAACTGTGTTCACTAGCAA--CCTCAAACAGACACCATGGTG
+CATCTGACTCCTGAGGAGAAGTCTGCCGTTACTGCCCTGTGGGGCAAGGTGAACGTGGAT
+GAAGTTGGTGGTGAGGCCCTGGGCAGGCTGCTGGTGGTCTACCCTTGGACCCAGAGGTTC
+TTTGAGTCCTTTGGGGATCTGTCCACTCCTGATGCTGTTATGGGCAACCCTAAGGTGAAG
+GCTCATGGCAAGAAAGTGCTCGGTGCCTTTAGTGATGGCCTGGCTCACCTGGACAACCTC
+AAGGGCACCTTTGCCACACTGAGTGAGCTGCACTGTGACAAGCTGCACGTGGATCCTGAG
+AACTTCAGGCTCCTGGGCAACGTGCTGGTCTGTGTGCTGGCCCATCACTTTGGCAAAGAA
+TTCACCCCACCAGTGCAGGCTGCCTATCAGAAAGTGGTGGCTGGTGTGGCTAATGCCCTG
+GCCCACAAGTATCACTAAGCTCGCTTTCTTGCTGTCCAATTTCTATTAAAGGTTCCTTTG
+TTCCCTAAGTCCAACTACTAAACTGGGGGATATTATGAAGGGCCTTGAGCATCTGGATTC
+TGCCTAATAAAAAACATTTATTTTCATTGCAA----------------`.replace(/\s/g, ""),
+  },
+  {
+    name: "Mouse",
+    sequence: `TTACGTTTGCTTCTGATTCTGTTGTGTTGACTTGCAACCTCAGAAACAGACATCATGGTG
+CACCTGACTGATGCTGAGAAGGCTGCTGTCTCTGGCCTGTGGGGAAAGGTGAACGCCGAT
+GAAGTTGGTGGTGAGGCCCTGGGCAGGCTGCTGGTTGTCTACCCTTGGACCCAGCGGTAC
+TTTGATAGCTTTGGAGACCTATCCTCTGCCTCTGCTATCATGGGTAATGCCAAAGTGAAG
+GCCCATGGCAAGAAAGTGATAACTGCCTTTAACGATGGCCTGAATCACTTGGACAGCCTC
+AAGGGCACCTTTGCCAGCCTCAGTGAGCTCCACTGTGACAAGCTGCATGTGGATCCTGAG
+AACTTCAGGCTCCTGGGCAATATGATCGTGATTGTGCTGGGCCACCACCTGGGCAAGGAT
+TTCACCCCCGCTGCACAGGCTGCCTTCCAGAAGGTGGTGGCTGGAGTGGCTGCTGCCCTG
+GCTCACAAGTACCACTAAGCCCCTTTTC-TGCTATTGTCTATGCACAAAGGTTATATGTC
+CCCTAGAGAAAAACTGTCAATTGTGGGGAAATGATGAAG-ACCTTTGGGCATCTAGCTTT
+TATCTAATAAATGATATTTACTGTCATCTCAAAAAAAAAAAAAAAAAA`.replace(/\s/g, ""),
+  },
+  {
+    name: "Rat",
+    sequence: `-------TGCTTCTGACATAGTTGTGTTGACTCACAAACTCAGAAACAGACACCATGGTG
+CACCTGACTGATGCTGAGAAGGCTGCTGTTAATGGCCTGTGGGGAAAGGTGAACCCTGAT
+GATGTTGGTGGCGAGGCCCTGGGCAGGCTGCTGGTTGTCTACCCTTGGACCCAGAGGTAC
+TTTGATAGCTTTGGGGACCTGTCCTCTGCCTCTGCTATCATGGGTAACCCTAAGGTGAAG
+GCCCATGGCAAGAAGGTGATAAACGCCTTCAATGATGGCCTGAAACACTTGGACAACCTC
+AAGGGCACCTTTGCTCATCTGAGTGAACTCCACTGTGACAAGCTGCATGTGGATCCTGAG
+AACTTCAGGCTCCTGGGCAATATGATTGTGATTGTGTTGGGCCACCACCTGGGCAAGGAA
+TTCACCCCCTGTGCACAGGCTGCCTTCCAGAAGGTGGTGGCTGGAGTGGCCAGTGCCCTG
+GCTCACAAGTACCACTAAACCTCTTTTCCTGCTCTTGTCTTTGTGCAATGGTCAATTGTT
+CCCAAGAGAGCATCTGTCAGTTGTTGTCAAAATGACAAAGACCTTTGAAAATCTGTCCTA
+C---TAATAAAAGGCATTTACTTTCACTGC------------------
+`.replace(/\s/g, ""),
+  },
 ];
 
 // Draw a single nucleotide sequence with a position axis and zoom.
@@ -35,12 +75,6 @@ export function drawSequence(sequence: string): void {
     .scaleLinear()
     .domain([0.5, sequenceLength + 0.5])
     .range([20, 580]);
-
-  console.log("Start:", xScale(0));
-  console.log("Middle:", xScale(sequenceLength / 2));
-  console.log("End:", xScale(sequenceLength));
-  console.log("Sequence received:", sequence);
-  console.log("Sequence length:", sequenceLength);
 
   // Clear the previous visualization before drawing a new SVG.
   const container = d3.select("#sequence-plot");
@@ -209,7 +243,7 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
     gapPercentage,
   });
 
-  // Layout: 40 alignment columns per block, one row per sequence.
+  // Layout: 90 alignment columns per block, one row per sequence.
   const columnsPerBlock = 90;
   const numberOfBlocks = Math.ceil(alignmentLength / columnsPerBlock);
 
@@ -469,8 +503,6 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
     .text((d) => d.name)
     .attr("font-size", 12);
 
-  console.log("OVERVIEW FUNCTION CALLED");
-
   // Draw horizontal bars with breaks at alignment gaps
   sequences.forEach((item, rowIndex) => {
     const sequence = item.sequence;
@@ -568,9 +600,6 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
 
           return `translate(${x}, 0) scale(${1 / transform.k}, 1) translate(${-x}, 0)`;
         });
-
-      console.log("Nucleotide width:", nucleotideWidth);
-      console.log("Show letters:", showLetters);
 
       // Zoom horizontally while keeping row positions fixed
       zoomGroup.attr(

@@ -96,35 +96,43 @@ if (app) {
       </div>
 
       <!-- Plot and Clear buttons -->
-      <div class="d-flex justify-content-between">
-        <button
-          id="plot-button"
-          class="btn btn-primary"
-          type="button"
-        >
-          Plot Sequence
-        </button>
+      <!-- Sequence testing and plotting buttons -->
+<div class="d-flex gap-2 flex-wrap mb-3">
+  <button
+    id="load-example-button"
+    class="btn btn-primary"
+    type="button"
+  >
+    Load Example
+  </button>
 
-        <button
-          id="clear-button"
-          class="btn btn-primary"
-          type="button"
-        >
-          Clear
-        </button>
-      </div>
+  <button
+    id="plot-button"
+    class="btn btn-primary"
+    type="button"
+  >
+    Plot Sequence
+  </button>
 
-<!-- Button to display the example multiple-sequence alignment -->
-      <div class="mt-3">
-        <button
-          id="alignment-button"
-          class="btn btn-primary"
-          type="button"
-        >
-          Show Alignment
-        </button>
-      </div>
+  <button
+    id="clear-button"
+    class="btn btn-primary"
+    type="button"
+  >
+    Clear
+  </button>
+</div>
 
+<!-- Multiple-sequence alignment button -->
+<div class="mb-3">
+  <button
+    id="alignment-button"
+    class="btn btn-primary"
+    type="button"
+  >
+    Show Alignment
+  </button>
+</div>
       <!-- Sequence validation messages -->
       <p id="sequence-info" class="mt-3 text-secondary"></p>
 
@@ -139,6 +147,9 @@ if (app) {
 const sequenceInput =
   document.querySelector<HTMLTextAreaElement>("#sequence-input");
 
+const loadExampleButton = document.querySelector<HTMLButtonElement>(
+  "#load-example-button",
+);
 const sequenceFile = document.querySelector<HTMLInputElement>("#sequence-file");
 
 const plotButton = document.querySelector<HTMLButtonElement>("#plot-button");
@@ -150,6 +161,33 @@ const sequenceInfo =
 
 const sequencePlot = document.querySelector<HTMLDivElement>("#sequence-plot");
 
+// Load the saved Human HBB sequence into the textarea
+if (loadExampleButton && sequenceInput) {
+  loadExampleButton.addEventListener("click", () => {
+    const humanHBB = exampleAlignment.find((record) => record.name === "Human");
+
+    if (!humanHBB) {
+      return;
+    }
+
+    // Remove alignment gaps and whitespace
+    sequenceInput.value = humanHBB.sequence.replace(/[-\s]/g, "");
+
+    // Reset any previously uploaded alignment
+    uploadedAlignment = [];
+
+    if (sequenceFile) {
+      sequenceFile.value = "";
+    }
+
+    sequencePlot?.replaceChildren();
+
+    if (sequenceInfo) {
+      sequenceInfo.textContent =
+        "Human HBB example loaded. Click Plot Sequence.";
+    }
+  });
+}
 // 6. Validate and plot a nucleotide sequence
 if (sequenceInput && plotButton && sequenceInfo) {
   plotButton.addEventListener("click", () => {
@@ -273,7 +311,6 @@ if (clearButton && sequenceInput && sequenceFile && sequenceInfo) {
 }
 
 // 9. Display uploaded or example alignment
-
 const alignmentButton =
   document.querySelector<HTMLButtonElement>("#alignment-button");
 
