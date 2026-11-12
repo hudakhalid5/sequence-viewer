@@ -1,12 +1,14 @@
 # Sequence Viewer
 
+## Work in progress
+
 An interactive web application. The project explores nucleotide sequence visualization and multiple-sequence alignment.
 
 ## Technology
 
 - Vite and vanilla TypeScript
-- D3.js for SVG-based visualization
-- Bootstrap 5 for interface styling
+- D3.js for
+- Bootstrap 5
 
 ## Run locally
 
@@ -30,7 +32,7 @@ Open the **Local** URL printed by Vite.
 - Multiple-sequence alignment
 - Alignment conservation, mismatch and gap statistics
 - Nucleotide coloring and alignment legend
-- Show alignment button will show alligment of 3 sequences
+- Show alignment button will show an example of 3 sequences alignment
 
 ## Repository structure
 
@@ -41,8 +43,8 @@ sequence-viewer/
 ├── index.html
 ├── package.json
 ├── src/
-│   ├── main.ts       # UI and input handling
-│   ├── plot.ts       # D3 visualizations
-│   └── style.css     # Custom styling
+│   ├── main.ts
+│   ├── plot.ts
+│   └── style.css
 └── README.md
 ```
