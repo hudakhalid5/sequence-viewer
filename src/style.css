@@ -3,3 +3,16 @@
 #app {
   min-height: 100vh;
 }
+
+/* Keep wide SVGs at their original size and scroll the plot instead of the page. */
+#sequence-plot {
+  overflow-x: auto;
+}
+
+#sequence-plot:empty {
+  display: none;
+}
+
+#sequence-plot > svg {
+  display: block;
+}

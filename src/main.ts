@@ -1,63 +1,19 @@
-// 1. Imports and styles
-import {
-  drawSequence,
-  drawAlignment,
-  drawSequenceOverview,
-  exampleAlignment,
-  type AlignedSequence,
-} from "./plot";
+import type { AlignedSequence } from "./alignment";
+import { exampleAlignment, exampleRiboSeq } from "./examples";
+import { readAlignedFasta } from "./fasta";
+import { drawAlignment, drawSequence } from "./plot";
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./style.css";
 
-// 2. Parse multi-FASTA records
-// Each FASTA header starts a new record; sequence lines are concatenated.
-function parseFasta(text: string): AlignedSequence[] {
-  const sequences: AlignedSequence[] = [];
-
-  let currentName = "";
-  let currentSequence = "";
-
-  for (const line of text.split(/\r?\n/)) {
-    const trimmedLine = line.trim();
-
-    if (trimmedLine === "") {
-      continue;
-    }
-
-    if (trimmedLine.startsWith(">")) {
-      if (currentName !== "") {
-        sequences.push({
-          name: currentName,
-          sequence: currentSequence,
-        });
-      }
-
-      currentName = trimmedLine.slice(1).trim();
-      currentSequence = "";
-    } else {
-      currentSequence += trimmedLine.toUpperCase();
-    }
-  }
-
-  if (currentName !== "") {
-    sequences.push({
-      name: currentName,
-      sequence: currentSequence,
-    });
-  }
-
-  return sequences;
-}
-
-// 3. Alignment state
-// Used by Show Alignment; falls back to exampleAlignment when empty.
-let uploadedAlignment: AlignedSequence[] = [];
-
-// 4. Build the user interface
 const app = document.querySelector<HTMLDivElement>("#app");
 
 if (app) {
+  setupViewer(app);
+}
+
+// Mount the viewer and connect its controls to upload state and rendering.
+function setupViewer(app: HTMLDivElement): void {
   app.innerHTML = `
     <main class="container py-5">
 
@@ -67,7 +23,6 @@ if (app) {
         Interactive visualization of nucleotide sequences
       </p>
 
-      <!-- FASTA file upload -->
       <div class="mb-3">
         <label for="sequence-file" class="form-label">
           Upload a FASTA file
@@ -81,7 +36,6 @@ if (app) {
         />
       </div>
 
-      <!-- Manual sequence input -->
       <div class="mb-3">
         <label for="sequence-input" class="form-label">
           Input Sequence
@@ -95,231 +49,198 @@ if (app) {
         ></textarea>
       </div>
 
-      <!-- Plot and Clear buttons -->
-      <!-- Sequence testing and plotting buttons -->
-<div class="d-flex gap-2 flex-wrap mb-3">
-  <button
-    id="load-example-button"
-    class="btn btn-primary"
-    type="button"
-  >
-    Load Example
-  </button>
+      <div class="d-flex gap-2 flex-wrap mb-3">
+        <button id="plot-button" class="btn btn-primary" type="button">
+          Plot Sequence
+        </button>
+        <button id="load-example-button" class="btn btn-outline-secondary" type="button">
+          Load Example
+        </button>
+        <button id="clear-button" class="btn btn-outline-secondary" type="button">
+          Clear
+        </button>
+      </div>
 
-  <button
-    id="plot-button"
-    class="btn btn-primary"
-    type="button"
-  >
-    Plot Sequence
-  </button>
-
-  <button
-    id="clear-button"
-    class="btn btn-primary"
-    type="button"
-  >
-    Clear
-  </button>
-</div>
-
-<!-- Multiple-sequence alignment button -->
-<div class="mb-3">
-  <button
-    id="alignment-button"
-    class="btn btn-primary"
-    type="button"
-  >
-    Show Alignment
-  </button>
-</div>
-      <!-- Sequence validation messages -->
+      <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <button
+          id="alignment-button"
+          class="btn btn-primary"
+          type="button"
+          aria-describedby="alignment-source"
+        >
+          Show Alignment
+        </button>
+        <span id="alignment-source" class="small text-body-secondary" role="status"></span>
+      </div>
       <p id="sequence-info" class="mt-3 text-secondary"></p>
 
-      <!-- Container for the D3 visualization -->
-      <div id="sequence-plot" class="mt-4"></div>
+      <div
+        id="sequence-plot"
+        class="mt-4"
+        role="region"
+        aria-label="Sequence visualization"
+        tabindex="0"
+      ></div>
 
     </main>
   `;
-}
 
-// 5. Select interface elements
-const sequenceInput =
-  document.querySelector<HTMLTextAreaElement>("#sequence-input");
+  let uploadedAlignment: AlignedSequence[] = [];
+  // Track the latest file selection so a reset can invalidate a pending read.
+  let latestUpload = 0;
 
-const loadExampleButton = document.querySelector<HTMLButtonElement>(
-  "#load-example-button",
-);
-const sequenceFile = document.querySelector<HTMLInputElement>("#sequence-file");
+  const sequenceInput =
+    app.querySelector<HTMLTextAreaElement>("#sequence-input");
 
-const plotButton = document.querySelector<HTMLButtonElement>("#plot-button");
+  const loadExampleButton = app.querySelector<HTMLButtonElement>(
+    "#load-example-button",
+  );
+  const sequenceFile = app.querySelector<HTMLInputElement>("#sequence-file");
 
-const clearButton = document.querySelector<HTMLButtonElement>("#clear-button");
+  const plotButton = app.querySelector<HTMLButtonElement>("#plot-button");
 
-const sequenceInfo =
-  document.querySelector<HTMLParagraphElement>("#sequence-info");
+  const clearButton = app.querySelector<HTMLButtonElement>("#clear-button");
 
-const sequencePlot = document.querySelector<HTMLDivElement>("#sequence-plot");
+  const sequenceInfo =
+    app.querySelector<HTMLParagraphElement>("#sequence-info");
 
-// Load the saved Human HBB sequence into the textarea
-if (loadExampleButton && sequenceInput) {
-  loadExampleButton.addEventListener("click", () => {
-    const humanHBB = exampleAlignment.find((record) => record.name === "Human");
+  const sequencePlot = app.querySelector<HTMLDivElement>("#sequence-plot");
+  const alignmentButton =
+    app.querySelector<HTMLButtonElement>("#alignment-button");
 
-    if (!humanHBB) {
-      return;
+  const alignmentSource = app.querySelector("#alignment-source");
+
+  // Update the stored records and the source label together.
+  function setUploadedAlignment(sequences: AlignedSequence[]): void {
+    uploadedAlignment = sequences;
+    if (alignmentSource) {
+      alignmentSource.textContent =
+        sequences.length > 0 ? "Source: uploaded FASTA" : "";
     }
+  }
 
-    // Remove alignment gaps and whitespace
-    sequenceInput.value = humanHBB.sequence.replace(/[-\s]/g, "");
+  // Load the Human example into the single-sequence input.
+  if (loadExampleButton && sequenceInput) {
+    loadExampleButton.addEventListener("click", () => {
+      const humanHBB = exampleAlignment.find((record) => record.name === "Human");
 
-    // Reset any previously uploaded alignment
-    uploadedAlignment = [];
+      if (!humanHBB) {
+        return;
+      }
 
-    if (sequenceFile) {
-      sequenceFile.value = "";
-    }
+      // The single-sequence plot expects an ungapped sequence.
+      sequenceInput.value = humanHBB.sequence.replace(/[-\s]/g, "");
 
-    sequencePlot?.replaceChildren();
+      latestUpload++;
+      setUploadedAlignment([]);
 
-    if (sequenceInfo) {
-      sequenceInfo.textContent =
-        "Human HBB example loaded. Click Plot Sequence.";
-    }
-  });
-}
-// 6. Validate and plot a nucleotide sequence
-if (sequenceInput && plotButton && sequenceInfo) {
-  plotButton.addEventListener("click", () => {
-    // Normalize manual input before validating A/C/G/T/U.
-    const sequence = sequenceInput.value.toUpperCase().replace(/\s/g, "");
-
-    if (sequence.length === 0) {
-      sequenceInfo.textContent = "Please enter a sequence.";
-      sequencePlot?.replaceChildren();
-      return;
-    }
-
-    if (!/^[ACGTU]+$/.test(sequence)) {
-      sequenceInfo.textContent =
-        "Invalid sequence: Allowed characters are A, C, G, T or U.";
+      if (sequenceFile) {
+        sequenceFile.value = "";
+      }
 
       sequencePlot?.replaceChildren();
-      return;
-    }
-
-    sequenceInfo.textContent = `Valid sequence: ${sequence.length} nucleotides`;
-
-    drawSequence(sequence);
-  });
-}
-
-// 7. Read and validate an uploaded FASTA file
-if (sequenceFile && sequenceInput) {
-  sequenceFile.addEventListener("change", async () => {
-    const file = sequenceFile.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    const content = await file.text();
-
-    const parsedSequences = parseFasta(content);
-
-    console.log("Parsed FASTA sequences:", parsedSequences);
-
-    if (parsedSequences.length === 0) {
-      uploadedAlignment = [];
 
       if (sequenceInfo) {
         sequenceInfo.textContent =
-          "Invalid FASTA file: no sequence records were found.";
+          "Human HBB example loaded. Click Plot Sequence.";
+      }
+    });
+  }
+  // Normalize and validate the textarea value before plotting.
+  if (sequenceInput && plotButton && sequenceInfo) {
+    plotButton.addEventListener("click", () => {
+      const sequence = sequenceInput.value.toUpperCase().replace(/\s/g, "");
+
+      if (sequence.length === 0) {
+        sequenceInfo.textContent = "Please enter a sequence.";
+        sequencePlot?.replaceChildren();
+        return;
       }
 
-      return;
-    }
+      if (!/^[ACGTU]+$/.test(sequence)) {
+        sequenceInfo.textContent =
+          "Invalid sequence: Allowed characters are A, C, G, T or U.";
 
-    const emptyRecord = parsedSequences.find(
-      (record) => record.sequence.length === 0,
-    );
-
-    if (emptyRecord) {
-      uploadedAlignment = [];
-
-      if (sequenceInfo) {
-        sequenceInfo.textContent = `Invalid FASTA file: "${emptyRecord.name}" has an empty sequence.`;
+        sequencePlot?.replaceChildren();
+        return;
       }
 
-      return;
-    }
-    uploadedAlignment = parsedSequences;
+      sequenceInfo.textContent = `Valid sequence: ${sequence.length} nucleotides`;
 
-    const invalidRecord = parsedSequences.find(
-      (record) => !/^[ACGTUN-]+$/.test(record.sequence),
-    );
+      drawSequence(sequence);
+    });
+  }
 
-    if (invalidRecord) {
-      uploadedAlignment = [];
+  // Read and validate the selected FASTA before making it available to plot.
+  if (sequenceFile && sequenceInput) {
+    sequenceFile.addEventListener("change", handleFastaUpload);
 
-      if (sequenceInfo) {
-        sequenceInfo.textContent = `Invalid FASTA file: "${invalidRecord.name}" contains unsupported characters.`;
+    async function handleFastaUpload() {
+      const uploadId = ++latestUpload;
+      const file = sequenceFile?.files?.[0];
+
+      if (!file || !sequenceInput) {
+        return;
       }
 
-      return;
-    }
-
-    // An aligned FASTA must contain sequences of equal length.
-    const expectedLength = parsedSequences[0].sequence.length;
-
-    const unequalRecord = parsedSequences.find(
-      (record) => record.sequence.length !== expectedLength,
-    );
-
-    if (unequalRecord) {
-      uploadedAlignment = [];
-
-      if (sequenceInfo) {
-        sequenceInfo.textContent = `Invalid alignment: "${unequalRecord.name}" has ${unequalRecord.sequence.length} positions; expected ${expectedLength}.`;
+      let content: string;
+      try {
+        content = await file.text();
+      } catch {
+        if (uploadId === latestUpload) {
+          setUploadedAlignment([]);
+          if (sequenceInfo) {
+            sequenceInfo.textContent = "Could not read the selected FASTA file.";
+          }
+        }
+        return;
       }
 
-      return;
-    }
+      // A newer file selection or a reset can happen while the read is pending.
+      if (uploadId !== latestUpload) {
+        return;
+      }
 
-    // Show a single record in the textarea; keep multi-FASTA in memory.
-    if (parsedSequences.length === 1) {
-      sequenceInput.value = parsedSequences[0].sequence;
-    } else {
+      const result = readAlignedFasta(content);
+      if ("error" in result) {
+        setUploadedAlignment([]);
+        if (sequenceInfo) {
+          sequenceInfo.textContent = result.error;
+        }
+        return;
+      }
+
+      // Show one uploaded record in the textarea. Multiple records go to the alignment view.
+      setUploadedAlignment(result.sequences);
+      sequenceInput.value =
+        result.sequences.length === 1 ? result.sequences[0].sequence : "";
+    }
+  }
+
+  // Reset the inputs and output. Advancing the upload ID invalidates pending reads.
+  if (clearButton && sequenceInput && sequenceFile && sequenceInfo) {
+    clearButton.addEventListener("click", () => {
       sequenceInput.value = "";
-    }
-  });
-}
 
-// 8. Clear inputs and visualization
-if (clearButton && sequenceInput && sequenceFile && sequenceInfo) {
-  clearButton.addEventListener("click", () => {
-    sequenceInput.value = "";
+      sequenceFile.value = "";
 
-    sequenceFile.value = "";
+      latestUpload++;
+      setUploadedAlignment([]);
 
-    uploadedAlignment = [];
+      sequenceInfo.textContent = "";
 
-    sequenceInfo.textContent = "";
+      sequencePlot?.replaceChildren();
+    });
+  }
 
-    sequencePlot?.replaceChildren();
-  });
-}
-
-// 9. Display uploaded or example alignment
-const alignmentButton =
-  document.querySelector<HTMLButtonElement>("#alignment-button");
-
-if (alignmentButton) {
-  alignmentButton.addEventListener("click", () => {
-    const sequences =
-      uploadedAlignment.length > 0 ? uploadedAlignment : exampleAlignment;
-
-    drawAlignment(sequences);
-    drawSequenceOverview(sequences);
-  });
+  // Prefer the uploaded alignment. The dummy Ribo-seq track belongs to the built-in example.
+  if (alignmentButton) {
+    alignmentButton.addEventListener("click", () => {
+      if (uploadedAlignment.length > 0) {
+        drawAlignment(uploadedAlignment);
+      } else {
+        drawAlignment(exampleAlignment, exampleRiboSeq);
+      }
+    });
+  }
 }

@@ -1,62 +1,15 @@
-// D3 handles SVG drawing, scales, axes and zoom interaction.
 import * as d3 from "d3";
+import {
+  classifyColumn,
+  type AlignedSequence,
+  type AlignmentColumn,
+  type ColumnCategory,
+} from "./alignment";
 
-// One record in a multiple-sequence alignment.
-export type AlignedSequence = {
-  name: string;
-  sequence: string;
-};
+import { mapRiboSeqToColumns, type RiboSeqTrack } from "./ribo-seq";
 
-// Demonstration alignment used when no FASTA alignment is uploaded.
-export const exampleAlignment: AlignedSequence[] = [
-  {
-    name: "Human",
-    sequence: `--ACATTTGCTTCTGACACAACTGTGTTCACTAGCAA--CCTCAAACAGACACCATGGTG
-CATCTGACTCCTGAGGAGAAGTCTGCCGTTACTGCCCTGTGGGGCAAGGTGAACGTGGAT
-GAAGTTGGTGGTGAGGCCCTGGGCAGGCTGCTGGTGGTCTACCCTTGGACCCAGAGGTTC
-TTTGAGTCCTTTGGGGATCTGTCCACTCCTGATGCTGTTATGGGCAACCCTAAGGTGAAG
-GCTCATGGCAAGAAAGTGCTCGGTGCCTTTAGTGATGGCCTGGCTCACCTGGACAACCTC
-AAGGGCACCTTTGCCACACTGAGTGAGCTGCACTGTGACAAGCTGCACGTGGATCCTGAG
-AACTTCAGGCTCCTGGGCAACGTGCTGGTCTGTGTGCTGGCCCATCACTTTGGCAAAGAA
-TTCACCCCACCAGTGCAGGCTGCCTATCAGAAAGTGGTGGCTGGTGTGGCTAATGCCCTG
-GCCCACAAGTATCACTAAGCTCGCTTTCTTGCTGTCCAATTTCTATTAAAGGTTCCTTTG
-TTCCCTAAGTCCAACTACTAAACTGGGGGATATTATGAAGGGCCTTGAGCATCTGGATTC
-TGCCTAATAAAAAACATTTATTTTCATTGCAA----------------`.replace(/\s/g, ""),
-  },
-  {
-    name: "Mouse",
-    sequence: `TTACGTTTGCTTCTGATTCTGTTGTGTTGACTTGCAACCTCAGAAACAGACATCATGGTG
-CACCTGACTGATGCTGAGAAGGCTGCTGTCTCTGGCCTGTGGGGAAAGGTGAACGCCGAT
-GAAGTTGGTGGTGAGGCCCTGGGCAGGCTGCTGGTTGTCTACCCTTGGACCCAGCGGTAC
-TTTGATAGCTTTGGAGACCTATCCTCTGCCTCTGCTATCATGGGTAATGCCAAAGTGAAG
-GCCCATGGCAAGAAAGTGATAACTGCCTTTAACGATGGCCTGAATCACTTGGACAGCCTC
-AAGGGCACCTTTGCCAGCCTCAGTGAGCTCCACTGTGACAAGCTGCATGTGGATCCTGAG
-AACTTCAGGCTCCTGGGCAATATGATCGTGATTGTGCTGGGCCACCACCTGGGCAAGGAT
-TTCACCCCCGCTGCACAGGCTGCCTTCCAGAAGGTGGTGGCTGGAGTGGCTGCTGCCCTG
-GCTCACAAGTACCACTAAGCCCCTTTTC-TGCTATTGTCTATGCACAAAGGTTATATGTC
-CCCTAGAGAAAAACTGTCAATTGTGGGGAAATGATGAAG-ACCTTTGGGCATCTAGCTTT
-TATCTAATAAATGATATTTACTGTCATCTCAAAAAAAAAAAAAAAAAA`.replace(/\s/g, ""),
-  },
-  {
-    name: "Rat",
-    sequence: `-------TGCTTCTGACATAGTTGTGTTGACTCACAAACTCAGAAACAGACACCATGGTG
-CACCTGACTGATGCTGAGAAGGCTGCTGTTAATGGCCTGTGGGGAAAGGTGAACCCTGAT
-GATGTTGGTGGCGAGGCCCTGGGCAGGCTGCTGGTTGTCTACCCTTGGACCCAGAGGTAC
-TTTGATAGCTTTGGGGACCTGTCCTCTGCCTCTGCTATCATGGGTAACCCTAAGGTGAAG
-GCCCATGGCAAGAAGGTGATAAACGCCTTCAATGATGGCCTGAAACACTTGGACAACCTC
-AAGGGCACCTTTGCTCATCTGAGTGAACTCCACTGTGACAAGCTGCATGTGGATCCTGAG
-AACTTCAGGCTCCTGGGCAATATGATTGTGATTGTGTTGGGCCACCACCTGGGCAAGGAA
-TTCACCCCCTGTGCACAGGCTGCCTTCCAGAAGGTGGTGGCTGGAGTGGCCAGTGCCCTG
-GCTCACAAGTACCACTAAACCTCTTTTCCTGCTCTTGTCTTTGTGCAATGGTCAATTGTT
-CCCAAGAGAGCATCTGTCAGTTGTTGTCAAAATGACAAAGACCTTTGAAAATCTGTCCTA
-C---TAATAAAAGGCATTTACTTTCACTGC------------------
-`.replace(/\s/g, ""),
-  },
-];
-
-// Draw a single nucleotide sequence with a position axis and zoom.
+// Render one nucleotide sequence and its zoomable position axis.
 export function drawSequence(sequence: string): void {
-  // Prepare sequence data and nucleotide colors.
   const sequenceLength = sequence.length;
   const nucleotides = sequence.split("");
 
@@ -76,7 +29,6 @@ export function drawSequence(sequence: string): void {
     .domain([0.5, sequenceLength + 0.5])
     .range([20, 580]);
 
-  // Clear the previous visualization before drawing a new SVG.
   const container = d3.select("#sequence-plot");
   container.selectAll("*").remove();
 
@@ -181,69 +133,86 @@ export function drawSequence(sequence: string): void {
   svg.call(zoomBehavior);
 }
 
-// Draw a wrapped multiple-sequence alignment with a legend and statistics.
-export function drawAlignment(sequences: AlignedSequence[]): void {
+const alignmentColors = {
+  gap: "#1d4ed8",
+  ambiguous: "#6b7280",
+  variable: "#b91c1c",
+  conserved: "#15803d",
+  neutral: "#364152",
+} as const;
+
+// Give gaps and ambiguous bases their own colors in every column category.
+function alignmentBaseColor(base: string, category: ColumnCategory): string {
+  if (base === "-") return alignmentColors.gap;
+  if (base === "N") return alignmentColors.ambiguous;
+  if (category === "variable" || category === "conserved") {
+    return alignmentColors[category];
+  }
+  return alignmentColors.neutral;
+}
+
+// Render the overview and wrapped grid from the same column classifications.
+export function drawAlignment(
+  sequences: readonly AlignedSequence[],
+  riboSeq?: RiboSeqTrack,
+): void {
   if (sequences.length === 0) {
     return;
   }
 
   const alignmentLength = sequences[0].sequence.length;
 
-  // Validate alignment lengths before calculating statistics.
   if (sequences.some((item) => item.sequence.length !== alignmentLength)) {
     console.error("All aligned sequences must have the same length.");
     return;
   }
 
-  // Classify each alignment column into one exclusive category.
-  let conservedCount = 0;
-  let variableCount = 0;
-  let ambiguousCount = 0;
-  let gapColumnCount = 0;
+  const columns: AlignmentColumn[] = Array.from(
+    { length: alignmentLength },
+    (_, position) =>
+      classifyColumn(sequences.map(({ sequence }) => sequence[position])),
+  );
+
+  d3.select("#sequence-plot").selectAll("*").remove();
+  drawSequenceOverview(sequences, columns, riboSeq);
+  drawAlignmentGrid(sequences, columns);
+}
+
+// Summarize alignment columns and render the sequence rows in wrapped blocks.
+function drawAlignmentGrid(
+  sequences: readonly AlignedSequence[],
+  columns: AlignmentColumn[],
+): void {
+  const alignmentLength = columns.length;
+  const counts: Record<ColumnCategory, number> = {
+    conserved: 0,
+    variable: 0,
+    ambiguous: 0,
+    gapped: 0,
+  };
   let gapCount = 0;
 
-  for (let columnIndex = 0; columnIndex < alignmentLength; columnIndex++) {
-    const nucleotides = sequences.map((seq) => seq.sequence[columnIndex]);
-
-    // Count individual gap characters independently.
-    gapCount += nucleotides.filter((base) => base === "-").length;
-
-    // Classification priority: gap, ambiguous, variable, conserved.
-    if (nucleotides.includes("-")) {
-      gapColumnCount++;
-    } else if (nucleotides.includes("N")) {
-      ambiguousCount++;
-    } else if (new Set(nucleotides).size > 1) {
-      variableCount++;
-    } else {
-      conservedCount++;
-    }
+  for (const { category, gapCount: columnGaps } of columns) {
+    counts[category]++;
+    gapCount += columnGaps;
   }
 
-  // Calculate percentages using alignment columns.
+  const {
+    conserved: conservedCount,
+    variable: variableCount,
+    ambiguous: ambiguousCount,
+    gapped: gapColumnCount,
+  } = counts;
+
   const conservationPercentage = (conservedCount / alignmentLength) * 100;
   const variablePercentage = (variableCount / alignmentLength) * 100;
   const ambiguousPercentage = (ambiguousCount / alignmentLength) * 100;
   const gapColumnPercentage = (gapColumnCount / alignmentLength) * 100;
 
-  // Gap-character percentage uses all sequence characters.
+  // Use all sequence characters as the denominator for individual gaps.
   const totalCharacters = sequences.length * alignmentLength;
   const gapPercentage = (gapCount / totalCharacters) * 100;
 
-  console.log("Alignment statistics:", {
-    conservedCount,
-    variableCount,
-    ambiguousCount,
-    gapColumnCount,
-    gapCount,
-    conservationPercentage,
-    variablePercentage,
-    ambiguousPercentage,
-    gapColumnPercentage,
-    gapPercentage,
-  });
-
-  // Layout: 90 alignment columns per block, one row per sequence.
   const columnsPerBlock = 90;
   const numberOfBlocks = Math.ceil(alignmentLength / columnsPerBlock);
 
@@ -252,13 +221,11 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
   const blockSpacing = 30;
   const topMargin = 140;
 
-  // Calculate the space needed for the longest sequence name.
-  // Fixed-width label column.
+  // Truncate long labels to keep the sequence columns at a fixed offset.
   const leftMargin = 180;
   const labelFontSize = 13;
   const labelMaxWidth = leftMargin - 20;
 
-  // Measure label widths to truncate only when necessary.
   const measurementCanvas = document.createElement("canvas");
   const context = measurementCanvas.getContext("2d");
 
@@ -287,7 +254,6 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
   const blockHeight = 25 + sequences.length * rowHeight + blockSpacing;
 
   const container = d3.select("#sequence-plot");
-  container.selectAll("*").remove();
 
   const svg = container
     .append("svg")
@@ -300,7 +266,7 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
     .attr("width", 12)
     .attr("height", 12)
     .attr("fill", "#fde2e2")
-    .attr("stroke", "#b91c1c");
+    .attr("stroke", alignmentColors.variable);
 
   svg
     .append("text")
@@ -311,20 +277,11 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
     .text("Variable alignment column");
 
   svg
-    .append("rect")
-    .attr("x", 250)
-    .attr("y", 5)
-    .attr("width", 12)
-    .attr("height", 12)
-    .attr("fill", "#dbeafe")
-    .attr("stroke", "#1d4ed8");
-
-  svg
     .append("text")
-    .attr("x", 268)
+    .attr("x", 250)
     .attr("y", 15)
     .attr("font-size", 12)
-    .attr("fill", "#364152")
+    .attr("fill", alignmentColors.gap)
     .text("Alignment gap (-)");
 
   svg
@@ -332,8 +289,24 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
     .attr("x", 410)
     .attr("y", 15)
     .attr("font-size", 12)
-    .attr("fill", "#15803d")
+    .attr("fill", alignmentColors.conserved)
     .text("Conserved");
+
+  svg
+    .append("text")
+    .attr("x", 500)
+    .attr("y", 15)
+    .attr("font-size", 12)
+    .attr("fill", alignmentColors.ambiguous)
+    .text("Ambiguous base (N)");
+
+  svg
+    .append("text")
+    .attr("x", 640)
+    .attr("y", 15)
+    .attr("font-size", 12)
+    .attr("fill", alignmentColors.neutral)
+    .text("Known base in a gapped or ambiguous column");
 
   const statisticsLines = [
     `Conserved: ${conservedCount} / ${alignmentLength} (${conservationPercentage.toFixed(1)}%) | Variable: ${variableCount} / ${alignmentLength} (${variablePercentage.toFixed(1)}%)`,
@@ -352,7 +325,7 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
       .text(line);
   });
 
-  // Draw position labels and sequence rows for each wrapped block.
+  // Each block repeats the sequence labels for its slice of alignment columns.
   for (let blockIndex = 0; blockIndex < numberOfBlocks; blockIndex++) {
     const start = blockIndex * columnsPerBlock;
     const end = Math.min(start + columnsPerBlock, alignmentLength);
@@ -406,32 +379,17 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
         const localIndex = columnIndex - start;
         const x = leftMargin + localIndex * columnWidth;
 
-        // Compare the current column with the first sequence.
-        const isDifferent = sequences.some(
-          (seq) =>
-            seq.sequence[columnIndex] !== sequences[0].sequence[columnIndex],
-        );
+        const { category } = columns[columnIndex];
+        const isVariable = category === "variable";
 
-        const isGap = nucleotide === "-";
-
-        const isConserved = !isDifferent && !isGap;
-
-        // Highlight gaps in blue, N in grey and mismatches in red.
-        if (isDifferent) {
+        if (isVariable) {
           svg
             .append("rect")
             .attr("x", x)
             .attr("y", y - 16)
             .attr("width", columnWidth)
             .attr("height", 20)
-            .attr(
-              "fill",
-              isGap
-                ? "#dbeafe" // Light blue: gap
-                : nucleotide === "N"
-                  ? "#e5e7eb" // Light grey: unknown nucleotide
-                  : "#fde2e2", // Light red: mismatch
-            );
+            .attr("fill", "#fde2e2");
         }
 
         svg
@@ -441,57 +399,109 @@ export function drawAlignment(sequences: AlignedSequence[]): void {
           .attr("text-anchor", "middle")
           .attr("font-family", "monospace")
           .attr("font-size", 14)
-          .attr("font-weight", isDifferent ? "bold" : "normal")
-          .attr(
-            "fill",
-            isGap
-              ? "#1d4ed8" // Blue: gap
-              : nucleotide === "N"
-                ? "#6b7280" // Grey: unknown nucleotide
-                : isDifferent
-                  ? "#b91c1c" // Red: mismatch
-                  : isConserved
-                    ? "#15803d" // Green: conserved
-                    : "#364152",
-          )
+          .attr("font-weight", isVariable ? "bold" : "normal")
+          .attr("fill", alignmentBaseColor(nucleotide, category))
           .text(nucleotide);
       }
     });
   }
 }
 
-// Draw a horizontal overview of aligned sequences.
+// Draw the alignment overview and its optional Ribo-seq track on a shared axis.
+function drawSequenceOverview(
+  sequences: readonly AlignedSequence[],
+  columns: AlignmentColumn[],
+  riboSeq?: RiboSeqTrack,
+): void {
+  const alignmentLength = columns.length;
 
-export function drawSequenceOverview(sequences: AlignedSequence[]): void {
-  if (sequences.length === 0) return;
-
-  const alignmentLength = sequences[0].sequence.length;
-
-  // Dimensions
   const width = 800;
   const leftMargin = 150;
   const rightMargin = 30;
   const rowHeight = 40;
-  const topMargin = 30;
+  const reference = sequences.find(
+    ({ name }) => name === riboSeq?.referenceName,
+  );
+  // Map counts from ungapped reference positions to alignment columns.
+  const signal =
+    riboSeq && reference
+      ? mapRiboSeqToColumns(reference.sequence, riboSeq.counts)
+      : [];
+  const signalTop = 38;
+  const signalBottom = 144;
+  const topMargin = signal.length > 0 ? signalBottom + 30 : 30;
   const height = topMargin + sequences.length * rowHeight + 40;
 
-  // Shared horizontal scale
+  // Map alignment column boundaries to pixels for both tracks.
   const xScale = d3
     .scaleLinear()
     .domain([0, alignmentLength])
     .range([leftMargin, width - rightMargin]);
 
-  // Create the SVG inside the existing plot container
   const svg = d3
     .select("#sequence-plot")
     .append("svg")
     .attr("width", width)
     .attr("height", height);
 
-  // Group for elements that will respond to zoom
-  const zoomGroup = svg.append("g").attr("class", "overview-zoom-group");
+  svg
+    .append("defs")
+    .append("clipPath")
+    .attr("id", "alignment-overview-clip")
+    .append("rect")
+    .attr("x", leftMargin)
+    .attr("width", width - leftMargin - rightMargin)
+    .attr("height", height);
 
-  // Draw sequence names
+  // Clip both tracks so zoomed marks cannot cover the sequence labels.
+  const zoomGroup = svg
+    .append("g")
+    .attr("clip-path", "url(#alignment-overview-clip)")
+    .append("g");
+
+  if (signal.length > 0 && reference) {
+    // SVG y coordinates increase downward, so count zero maps to the bottom.
+    const countScale = d3
+      .scaleLinear()
+      .domain([0, Math.max(1, d3.max(signal, ({ count }) => count) ?? 0)])
+      .nice()
+      .range([signalBottom, signalTop]);
+
+    svg
+      .append("text")
+      .attr("x", leftMargin)
+      .attr("y", 19)
+      .attr("font-size", 14)
+      .attr("font-weight", "bold")
+      .text(`Ribo-seq · ${reference.name} reference · Dummy data`);
+
+    svg
+      .append("text")
+      .attr("x", 10)
+      .attr("y", signalTop + 15)
+      .attr("font-size", 12)
+      .text("Footprint count");
+
+    svg
+      .append("g")
+      .attr("transform", `translate(${leftMargin}, 0)`)
+      .call(d3.axisLeft(countScale).ticks(4));
+
+    // Bind one rectangle to each mapped count and leave a little space between bars.
+    // The half-column offset centers each bar over its corresponding base.
+    const barWidth = (xScale(1) - xScale(0)) * 0.84;
+    zoomGroup
+      .selectAll(".ribo-seq-bar")
+      .data(signal)
+      .join("rect")
+      .attr("class", "ribo-seq-bar")
+      .attr("x", ({ column }) => xScale(column + 0.5) - barWidth / 2)
+      .attr("y", ({ count }) => countScale(count))
+      .attr("width", barWidth)
+      .attr("height", ({ count }) => signalBottom - countScale(count))
+      .attr("fill", "#176b65");
+  }
+
   svg
     .selectAll(".overview-label")
     .data(sequences)
@@ -503,7 +513,7 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
     .text((d) => d.name)
     .attr("font-size", 12);
 
-  // Draw horizontal bars with breaks at alignment gaps
+  // Treat the end of each sequence as a gap to close the final bar.
   sequences.forEach((item, rowIndex) => {
     const sequence = item.sequence;
     const y = topMargin + rowIndex * rowHeight - 8;
@@ -513,12 +523,10 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
     for (let i = 0; i <= sequence.length; i++) {
       const isGap = i === sequence.length || sequence[i] === "-";
 
-      // Start a new segment when a nucleotide is found
       if (!isGap && segmentStart === -1) {
         segmentStart = i;
       }
 
-      // End the current segment when a gap is found
       if (isGap && segmentStart !== -1) {
         zoomGroup
           .append("rect")
@@ -526,7 +534,7 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
           .attr("x", xScale(segmentStart))
           .attr("y", y)
           .attr("width", xScale(i) - xScale(segmentStart))
-          .attr("height", 12)
+          .attr("height", 6)
           .attr("fill", "#0d6efd");
 
         segmentStart = -1;
@@ -534,7 +542,6 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
     }
   });
 
-  // Create nucleotide letters, initially hidden
   const nucleotideLetters = zoomGroup
     .selectAll<SVGTextElement, { base: string; position: number; row: number }>(
       ".overview-nucleotide",
@@ -555,12 +562,33 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
     .attr("text-anchor", "middle")
     .attr("font-family", "monospace")
     .attr("font-size", 14)
-    .attr("fill", "#ffffff")
+    .attr("font-weight", (d) =>
+      columns[d.position].category === "variable" ? "bold" : "normal",
+    )
+    .attr("fill", (d) =>
+      alignmentBaseColor(d.base, columns[d.position].category),
+    )
     .attr("display", "none")
     .text((d) => d.base);
 
-  // Alignment position axis
-  const xAxis = d3.axisBottom(xScale).ticks(10);
+  // Place 1-based axis ticks at the centers of the 0-based alignment columns.
+  const positionScale = xScale.copy().domain([0.5, alignmentLength + 0.5]);
+  function drawPositionAxis(scale: typeof positionScale) {
+    const [start, end] = scale.domain();
+    return d3
+      .axisBottom(scale)
+      .tickValues(
+        d3
+          .ticks(start, end, 10)
+          .filter(
+            (position) =>
+              Number.isInteger(position) &&
+              position >= 1 &&
+              position <= alignmentLength,
+          ),
+      )
+      .tickFormat(d3.format("d"));
+  }
 
   svg
     .append("g")
@@ -569,9 +597,16 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
       "transform",
       `translate(0, ${topMargin + sequences.length * rowHeight})`,
     )
-    .call(xAxis);
+    .call(drawPositionAxis(positionScale));
 
-  // Enable horizontal zoom and pan for the sequence bars
+  svg
+    .append("text")
+    .attr("x", (leftMargin + width - rightMargin) / 2)
+    .attr("y", height - 5)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 12)
+    .text("Alignment column");
+
   const zoomBehavior = d3
     .zoom<SVGSVGElement, unknown>()
     .scaleExtent([1, 100])
@@ -586,13 +621,16 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
     .on("zoom", (event) => {
       const transform = event.transform;
 
-      // Calculate the visible width of one nucleotide
       const nucleotideWidth = (xScale(1) - xScale(0)) * transform.k;
 
-      // Letters become readable at approximately 14 pixels
+      // Switch to letters once each nucleotide has enough space to be legible.
       const showLetters = nucleotideWidth >= 14;
 
-      // Show letters when zoomed in, without stretching the text
+      zoomGroup
+        .selectAll<SVGRectElement, unknown>(".overview-bar")
+        .attr("display", showLetters ? "none" : null);
+
+      // Counteract horizontal zoom so the letters keep their original width.
       nucleotideLetters
         .attr("display", showLetters ? null : "none")
         .attr("transform", (d) => {
@@ -601,20 +639,19 @@ export function drawSequenceOverview(sequences: AlignedSequence[]): void {
           return `translate(${x}, 0) scale(${1 / transform.k}, 1) translate(${-x}, 0)`;
         });
 
-      // Zoom horizontally while keeping row positions fixed
+      // Move both tracks horizontally together while the count axis stays fixed.
       zoomGroup.attr(
         "transform",
         `translate(${transform.x}, 0) scale(${transform.k}, 1)`,
       );
 
-      // Update the position axis to match the zoomed bars
-      const zoomedScale = transform.rescaleX(xScale);
+      // Recalculate the visible column range for the bottom axis.
+      const zoomedScale = transform.rescaleX(positionScale);
 
       svg
         .select<SVGGElement>(".overview-axis")
-        .call(d3.axisBottom(zoomedScale).ticks(10));
+        .call(drawPositionAxis(zoomedScale));
     });
 
-  // Attach zoom interaction to the SVG
   svg.call(zoomBehavior);
 }
